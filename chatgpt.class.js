@@ -32,7 +32,7 @@ class ChatGPTClass extends CoreClass {
     try {
       const buffer = await downloadMediaMessage(ctx, "buffer");
       const pathTmpImage = `${process.cwd()}/tmp/image-${Date.now()}.png`;
-      await fs.writeFile(pathTmpImage, buffer);
+      await fs.promises.writeFile(pathTmpImage, buffer, null);
   
       // Realizar OCR en la imagen usando tesseract.js
       const { createWorker } = require('tesseract.js');
@@ -94,10 +94,54 @@ class ChatGPTClass extends CoreClass {
 
     // Verificar si el mensaje contiene el nombre "_event_voice_note__"
     if (body && body.includes("_event_voice_note__")) {
-      // Procesar como una nota de voz como lo hiciste antes
-      // ...
+        // Procesar como una nota de voz como lo hiciste antes
+        try {
+          const buffer = await downloadMediaMessage(ctx, "buffer");
+          const pathTmpOgg = `${process.cwd()}/tmp/voice-note-${Date.now()}.ogg`;
+          const pathTmpMp3 = `${process.cwd()}/tmp/voice-note-${Date.now()}.mp3`;
+          await fs.promises.writeFile(pathTmpOgg, buffer, null);
+          await convertOggMp3(pathTmpOgg, pathTmpMp3);
+          const text = await voiceToText(pathTmpMp3); // Transcribir la nota de voz a texto
       
-    } else if (body && body.includes("_event_media__")) {
+          if (!this.queue[from]) {
+            this.queue[from] = [];
+          }
+          const lastMessage = this.queue[from][this.queue[from].length - 1];
+      
+          // Enviar el texto a la API de GPT-3.5 Turbo y manejar la respuesta
+          const response = await this.openai.sendMessage(text, {
+            conversationId: groupId ? groupId : undefined,
+            parentMessageId: lastMessage ? lastMessage.id : undefined, // No se proporciona un mensaje padre
+          });
+      
+          this.queue[from].push(response);
+      
+          const parseMessage = {
+            ...response,
+            answer: response.text,
+          };
+      
+          // Puedes enviar la respuesta al remitente original
+          if (isGroupMsg) {
+            // Si es un mensaje de grupo, responder al grupo
+            this.sendFlowSimple([parseMessage], from, groupId);
+          } else {
+            // Si es un mensaje individual, responder al remitente original
+            this.sendFlowSimple([parseMessage], from, groupId);
+          }
+      
+          // No es necesario devolver nada aquí, ya que ya se envió la respuesta
+        } catch (error) {
+          console.error("Error al procesar la nota de voz:", error);
+          // En caso de error, también debes responder al remitente original
+          if (isGroupMsg) {
+            await this.sendFlowSimple("Ocurrió un error al procesar la nota de voz.", from, groupId);
+          } else {
+            await this.sendFlowSimple("Ocurrió un error al procesar la nota de voz.", from, groupId);
+          }
+        }
+      }
+       else if (body && body.includes("_event_media__")) {
       // Si es un mensaje de imagen, realizar OCR y enviar el texto a GPT-3.5 Turbo
       this.ocrAndSendToGPT(ctx, groupId);
     } else if (body && body.includes("_event_document__")) {
