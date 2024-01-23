@@ -1,10 +1,14 @@
 const { CoreClass } = require("@bot-whatsapp/bot");
 const { downloadMediaMessage } = require('@adiwajshing/baileys');
 const fs = require('fs');
+const ytdl = require('ytdl-core');
+const path = require('path');
 const pdf = require('pdf-parse');
 const { convertOggMp3 } = require('./services/convert');
 const { voiceToText } = require('./services/whisper');
 const { createWorker } = require('tesseract.js');
+const { Sticker, createSticker, StickerTypes } = require('wa-sticker-formatter');
+
 
 class ChatGPTClass extends CoreClass {
   queue = [];
@@ -14,6 +18,7 @@ class ChatGPTClass extends CoreClass {
   constructor(_database, _provider) {
     super(null, _database, _provider);
     this.init().then();
+    this.provider = _provider; // Define provider en el constructor
   }
 
   init = async () => {
@@ -26,6 +31,8 @@ class ChatGPTClass extends CoreClass {
       fetch: fetch.default,
     });
   }
+
+  
 
   // Función para realizar OCR en una imagen y luego enviar el texto a GPT-3.5 Turbo
   ocrAndSendToGPT = async (ctx, groupId) => {
@@ -87,6 +94,150 @@ class ChatGPTClass extends CoreClass {
       this.sendFlowSimple("Ocurrió un error al procesar el documento PDF.", ctx.from, groupId);
     }
   };
+  
+  async downloadVideoFromPlatform(url) {
+    try {
+      if (url.includes('instagram.com')) {
+        // Si la URL es de Instagram, descargar el video de Instagram
+        const videoPath = await this.downloadVideoFromInstagram(url);
+        return videoPath;
+      } else if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        // Si la URL es de YouTube, descargar el video de YouTube
+        const videoPath = await this.downloadVideoFromYouTube(url);
+        return videoPath;
+      } else if (url.includes('tiktok.com')) {
+        // Si la URL es de TikTok, descargar el video de TikTok
+        const videoPath = await this.downloadVideoFromTikTok(url);
+        return videoPath;
+      } else if (url.includes('facebook.com')) {
+        // Si la URL es de Facebook, descargar el video de Facebook
+        const videoPath = await this.downloadVideoFromFacebook(url);
+        return videoPath;
+      } else {
+        console.error('URL de plataforma desconocida:', url);
+        return null; // Retornar null para URLs desconocidas
+      }
+    } catch (error) {
+      console.error('Error al descargar el video:', error.message);
+      return null; // Retornar null en caso de error
+    }
+  }
+
+  async downloadVideoFromYouTube(url) {
+    try {
+      const videoInfo = await ytdl.getInfo(url);
+      const videoTitle = videoInfo.videoDetails.title;
+  
+      // Limpia el título para eliminar caracteres inválidos
+      const cleanedVideoTitle = videoTitle.replace(/[\/:*?"<>|]/g, '_'); // Reemplaza los caracteres inválidos por guiones bajos
+  
+      // Obtén una lista de archivos en el directorio
+      const files = fs.readdirSync('./tmp');
+  
+      // Encuentra el próximo número disponible para el nombre de archivo
+      let videoFileName = `${cleanedVideoTitle}.mp4`;
+      let fileNumber = 2;
+      while (files.includes(videoFileName)) {
+        videoFileName = `${cleanedVideoTitle}_${fileNumber}.mp4`;
+        fileNumber++;
+      }
+  
+      // Ruta donde se guardará el video
+      const videoPath = `./tmp/${videoFileName}`;
+  
+      const videoStream = ytdl(url, { quality: 'highest' });
+  
+      // Crea una promesa para la descarga y resolución
+      return new Promise(async (resolve, reject) => {
+        const writeStream = fs.createWriteStream(videoPath);
+  
+        videoStream.pipe(writeStream);
+  
+        writeStream.on('finish', () => {
+          resolve(videoPath); // Resuelve la promesa cuando la descarga se completa
+        });
+  
+        writeStream.on('error', (error) => {
+          reject(error); // Rechaza la promesa si hay un error
+        });
+      });
+    } catch (error) {
+      throw error;
+    }
+  }
+  
+  
+  
+
+  processCommand = async (ctx, command, groupId, isGroupMsg, from) => {
+    
+    try {
+      console.log('Comando recibido:'); // Agregado para depuración
+  
+      if (command === '!menu') {
+          // Responder al comando !menu con el menú de opciones
+          console.log('Responder al comando !menu'); // Agregado para depuración
+          const menuMessage = "¡Menú de opciones!\n\n1. !sticker: Crea un sticker con la última imagen enviada.\n2. !ayuda: Muestra la ayuda.";
+          await this.sendFlowSimple([{
+            answer: menuMessage
+          }], ctx.from, groupId);
+        } 
+        else  if (command === '!sticker') {
+               
+      } 
+      else if (command.startsWith('!descargar ')) {
+        const urlToDownload = command.slice('!descargar '.length);
+      
+        if (urlToDownload) {
+          const downloadedVideoPath = await this.downloadVideoFromPlatform(urlToDownload);
+  
+          if (downloadedVideoPath) {
+            // El video se ha descargado con éxito, ahora puedes enviarlo
+            const videoFileName = path.basename(downloadedVideoPath); // Obtén el nombre del archivo
+            
+            // Envía el video al usuario o grupo utilizando this.provider
+            const phone = ctx.from + "@s.whatsapp.net";
+            console.log(ctx);
+            console.log(phone);
+            console.log(downloadedVideoPath);
+            await this.provider.sendMedia(phone, downloadedVideoPath, "mensaje de texto");
+          } else {
+            // Ocurrió un error al descargar el video
+            console.error('Error al descargar el video.');
+            // Responder al remitente original
+            await this.sendFlowSimple("Ocurrió un error al descargar el video.", ctx.from, groupId);
+          }
+        } else {
+          // La URL no se proporcionó en el comando
+          // Responder al remitente original
+          await this.sendFlowSimple("Por favor, proporciona una URL válida para descargar el video.", ctx.from, groupId);
+        }
+      }
+    
+      else if (command === '!ayuda') {
+        // Responder al comando !ayuda con información de ayuda
+        console.log('Responder al comando !ayuda'); // Agregado para depuración
+        const ayudaMessage = "¡Bienvenido al bot de ayuda!\n\nSi necesitas ayuda puedes solicitarla al numero +573023606047 o en el siguiente enlace: www.wa.me/573023606047";
+        await this.sendFlowSimple([{
+          answer: ayudaMessage
+        }], ctx.from, groupId);
+      } else {
+        // Responder a comandos no reconocidos
+        console.log('Comando no reconocido:', command); // Agregado para depuración
+        const unknownCommandMessage = "Comando no reconocido. ¡Escribe !menu para ver las opciones disponibles!";
+        await this.sendFlowSimple([{
+          answer: unknownCommandMessage
+        }], ctx.from, groupId);
+      }
+    } catch (error) {
+      console.error("Error al procesar el comando:", error);
+      // En caso de error, también debes responder al remitente original
+      await this.sendFlowSimple([{
+        answer: "Ocurrió un error al procesar el comando."
+      }], ctx.from, groupId);
+    }
+  };
+  
 
   handleMsg = async (ctx) => {
     const { from, body, sender, isGroupMsg, messageType } = ctx;
@@ -147,7 +298,11 @@ class ChatGPTClass extends CoreClass {
     } else if (body && body.includes("_event_document__")) {
         // Si es un documento PDF, procesarlo y enviar su contenido a GPT-3.5 Turbo
         this.pdfAndSendToGPT(ctx, groupId);
-    }else {
+    } else if (body && body.startsWith('!')) {
+        // Procesar comandos con "!"
+        const commandWithSign = body.trim(); // Convierte a minúsculas y elimina espacios en blanco
+        await this.processCommand(ctx, commandWithSign, groupId, isGroupMsg, from);
+      } else {
       // El mensaje no es una nota de voz ni una imagen, procesarlo como un mensaje de texto
       if (!this.queue[from]) {
         this.queue[from] = [];
@@ -167,8 +322,7 @@ class ChatGPTClass extends CoreClass {
         answer: completion.text,
       };
 
-      // Enviar la respuesta al remitente original
-      this.sendFlowSimple([parseMessage], ctx.from, groupId); // Pass groupId for group messages
+      this.sendFlowSimple([parseMessage], ctx.from, groupId);
     }
   };
 }

@@ -5,3 +5,9 @@ node_modules
 *.png
 tmp/*
 !tmp/.gitkeep
+
+# managed
+**.data.json
+**.node-persist**
+**_IGNORE_**
+# end managed
